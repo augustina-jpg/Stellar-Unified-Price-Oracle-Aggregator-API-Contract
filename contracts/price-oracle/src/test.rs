@@ -290,13 +290,12 @@ fn test_submit_price_and_get_price() {
 
     client.submit_price(&source1, &asset, &100i128, &1234567890);
 
-    let price = client.get_price(&asset);
-    assert_eq!(price.price, 0i128);
-    assert_eq!(price.num_sources, 0u32);
+    // Only one source submitted, min_sources=2 → not aggregated yet → None
+    assert!(client.get_price(&asset, &0u64).is_none());
 
     client.submit_price(&source2, &asset, &110i128, &1234567890);
 
-    let price = client.get_price(&asset);
+    let price = client.get_price(&asset, &0u64).unwrap();
     assert_eq!(price.price, 105i128);
     assert_eq!(price.num_sources, 2u32);
     assert_eq!(price.timestamp, 1234567890u64);
@@ -328,7 +327,7 @@ fn test_submit_price_median_odd() {
     client.submit_price(&source2, &asset, &200i128, &1234567890);
     client.submit_price(&source3, &asset, &300i128, &1234567890);
 
-    let price = client.get_price(&asset);
+    let price = client.get_price(&asset, &0u64).unwrap();
     assert_eq!(price.price, 200i128);
     assert_eq!(price.num_sources, 3u32);
 }
@@ -361,7 +360,7 @@ fn test_submit_price_median_even() {
     client.submit_price(&source3, &asset, &300i128, &1234567890);
     client.submit_price(&source4, &asset, &400i128, &1234567890);
 
-    let price = client.get_price(&asset);
+    let price = client.get_price(&asset, &0u64).unwrap();
     assert_eq!(price.price, 250i128);
     assert_eq!(price.num_sources, 4u32);
 }
@@ -489,9 +488,8 @@ fn test_get_price_no_data() {
     let asset = Address::generate(&e);
     client.register_asset(&asset);
 
-    let price = client.get_price(&asset);
-    assert_eq!(price.price, 0i128);
-    assert_eq!(price.num_sources, 0u32);
+    // No prices submitted → None
+    assert!(client.get_price(&asset, &0u64).is_none());
 }
 
 #[test]
@@ -503,7 +501,7 @@ fn test_get_price_unregistered_asset() {
     init_admin(&client, &admin);
 
     let asset = Address::generate(&e);
-    client.get_price(&asset);
+    client.get_price(&asset, &0u64);
 }
 
 #[test]
@@ -743,13 +741,13 @@ fn test_multiple_assets() {
     client.submit_price(&source1, &btc, &30000000i128, &1234567890);
     client.submit_price(&source2, &btc, &31000000i128, &1234567890);
 
-    let xlm_price = client.get_price(&xlm);
+    let xlm_price = client.get_price(&xlm, &0u64).unwrap();
     assert_eq!(xlm_price.price, 101i128);
 
-    let eth_price = client.get_price(&eth);
+    let eth_price = client.get_price(&eth, &0u64).unwrap();
     assert_eq!(eth_price.price, 180500i128);
 
-    let btc_price = client.get_price(&btc);
+    let btc_price = client.get_price(&btc, &0u64).unwrap();
     assert_eq!(btc_price.price, 30500000i128);
 }
 
@@ -775,12 +773,12 @@ fn test_submit_price_updates_timestamp() {
     client.submit_price(&source1, &asset, &100i128, &1000u64);
     client.submit_price(&source2, &asset, &110i128, &2000u64);
 
-    let price = client.get_price(&asset);
+    let price = client.get_price(&asset, &0u64).unwrap();
     assert_eq!(price.timestamp, 2000u64);
 
     client.submit_price(&source2, &asset, &120i128, &3000u64);
 
-    let price = client.get_price(&asset);
+    let price = client.get_price(&asset, &0u64).unwrap();
     assert_eq!(price.timestamp, 3000u64);
 }
 
@@ -803,7 +801,7 @@ fn test_single_source_no_aggregation() {
 
     client.submit_price(&source1, &asset, &100i128, &1234567890);
 
-    let price = client.get_price(&asset);
+    let price = client.get_price(&asset, &0u64).unwrap();
     assert_eq!(price.price, 100i128);
     assert_eq!(price.num_sources, 1u32);
 }
@@ -832,11 +830,11 @@ fn test_price_source_not_affected_by_other_assets() {
     client.submit_price(&source1, &asset_a, &100i128, &1234567890);
     client.submit_price(&source2, &asset_a, &110i128, &1234567890);
 
-    let price_a = client.get_price(&asset_a);
+    let price_a = client.get_price(&asset_a, &0u64).unwrap();
     assert_eq!(price_a.price, 105i128);
 
-    let price_b = client.get_price(&asset_b);
-    assert_eq!(price_b.price, 0i128);
+    // asset_b has no submissions → None
+    assert!(client.get_price(&asset_b, &0u64).is_none());
 }
 
 // ---- SEP-40 Oracle Interface Tests ----
