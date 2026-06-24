@@ -89,7 +89,6 @@ pub fn clear_auth(e: &Env) {
     use soroban_sdk::xdr::SorobanAuthorizationEntry;
     e.set_auths(&[] as &[SorobanAuthorizationEntry]);
 }
-
 /// Sets the ledger sequence number and timestamp.
 pub fn ledger_default(e: &Env, seq: u32, timestamp: u64) {
     e.ledger().set(LedgerInfo {

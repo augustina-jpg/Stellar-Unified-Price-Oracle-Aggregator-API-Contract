@@ -25,6 +25,9 @@ pub fn initialize(
     if env.storage().persistent().has(&DataKey::Admin) {
         panic_with_error!(env, ErrorCode::AlreadyInitialized);
     }
+    if description.len() > MAX_DESCRIPTION_LENGTH {
+        panic_with_error!(env, ErrorCode::DescriptionTooLong);
+    }
     admin.require_auth();
     env.storage().persistent().set(&DataKey::Admin, &admin);
     env.storage().persistent().set(
@@ -199,6 +202,9 @@ pub fn get_decimals(env: &Env) -> u32 {
 pub fn set_description(env: &Env, new_description: String) {
     let admin = get_admin(env);
     admin.require_auth();
+    if new_description.len() > MAX_DESCRIPTION_LENGTH {
+        panic_with_error!(env, ErrorCode::DescriptionTooLong);
+    }
     env.storage()
         .persistent()
         .set(&DataKey::Description, &new_description);
