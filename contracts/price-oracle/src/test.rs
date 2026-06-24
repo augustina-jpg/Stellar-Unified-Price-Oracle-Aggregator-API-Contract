@@ -1086,3 +1086,360 @@ fn test_sep40_prices_unregistered_asset() {
     let result = client.prices(&Asset::Stellar(unregistered), &5u32);
     assert!(result.is_none());
 }
+
+// ---- Task 1: Duplicate Submission Detection Tests ----
+
+#[test]
+fn test_duplicate_submission_same_ledger_updates_price() {
+    let e = Env::default();
+    ledger_default(&e, 100, 1234567890);
+    let (client, _admin, source1, asset1) = setup_basic(&e);
+
+    // First submission
+    client.submit_price(&source1, &asset1, &100i128, &1234567890);
+    let entry = client.get_source_price(&asset1, &source1);
+    assert_eq!(entry.price, 100i128);
+
+    // Second submission same ledger — should update
+    client.submit_price(&source1, &asset1, &200i128, &1234567890);
+    let entry = client.get_source_price(&asset1, &source1);
+    assert_eq!(entry.price, 200i128);
+}
+
+#[test]
+fn test_duplicate_submission_different_ledger_no_dedup_event() {
+    let e = Env::default();
+    let (client, _admin, source1, asset1) = setup_basic(&e);
+
+    ledger_default(&e, 100, 1000);
+    client.submit_price(&source1, &asset1, &100i128, &1000);
+
+    // Different ledger — not a duplicate
+    ledger_default(&e, 101, 2000);
+    client.submit_price(&source1, &asset1, &200i128, &2000);
+    let entry = client.get_source_price(&asset1, &source1);
+    assert_eq!(entry.price, 200i128);
+}
+
+#[test]
+fn test_duplicate_submission_dedup_reflected_in_aggregate() {
+    let e = Env::default();
+    ledger_default(&e, 100, 1234567890);
+
+    let admin = Address::generate(&e);
+    let client = create_contract(&e);
+    init_admin(&client, &admin);
+
+    let source1 = Address::generate(&e);
+    let source2 = Address::generate(&e);
+    client.add_source(&source1, &String::from_str(&e, "A"));
+    client.add_source(&source2, &String::from_str(&e, "B"));
+    client.set_min_sources_required(&2u32);
+
+    let asset = Address::generate(&e);
+    client.register_asset(&asset);
+
+    client.submit_price(&source1, &asset, &100i128, &1234567890);
+    client.submit_price(&source2, &asset, &200i128, &1234567890);
+
+    let price = client.get_price(&asset);
+    assert_eq!(price.price, 150i128);
+
+    // Duplicate from source1 with updated price — aggregate should change
+    client.submit_price(&source1, &asset, &300i128, &1234567890);
+    let price = client.get_price(&asset);
+    assert_eq!(price.price, 250i128); // median of [200, 300]
+}
+
+#[test]
+fn test_duplicate_submission_multiple_sources_same_ledger() {
+    let e = Env::default();
+    ledger_default(&e, 50, 500);
+    let (client, _admin, source1, asset1) = setup_basic(&e);
+
+    // source1 submits twice in same ledger
+    client.submit_price(&source1, &asset1, &100i128, &500);
+    client.submit_price(&source1, &asset1, &150i128, &500);
+    client.submit_price(&source1, &asset1, &175i128, &500);
+
+    let entry = client.get_source_price(&asset1, &source1);
+    assert_eq!(entry.price, 175i128);
+}
+
+// ---- Task 2: Empty Asset Registry Edge Case Tests ----
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_get_price_empty_registry() {
+    let e = Env::default();
+    let admin = Address::generate(&e);
+    let client = create_contract(&e);
+    init_admin(&client, &admin);
+
+    let asset = Address::generate(&e);
+    client.get_price(&asset);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_submit_price_empty_registry() {
+    let e = Env::default();
+    let admin = Address::generate(&e);
+    let client = create_contract(&e);
+    init_admin(&client, &admin);
+
+    let source = Address::generate(&e);
+    client.add_source(&source, &String::from_str(&e, "S"));
+
+    let asset = Address::generate(&e);
+    client.submit_price(&source, &asset, &100i128, &1000);
+}
+
+#[test]
+fn test_is_asset_registered_empty_registry() {
+    let e = Env::default();
+    let admin = Address::generate(&e);
+    let client = create_contract(&e);
+    init_admin(&client, &admin);
+
+    let asset1 = Address::generate(&e);
+    let asset2 = Address::generate(&e);
+    assert!(!client.is_asset_registered(&asset1));
+    assert!(!client.is_asset_registered(&asset2));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_get_all_prices_empty_registry() {
+    let e = Env::default();
+    let admin = Address::generate(&e);
+    let client = create_contract(&e);
+    init_admin(&client, &admin);
+
+    let asset = Address::generate(&e);
+    client.get_all_prices(&asset);
+}
+
+#[test]
+fn test_sep40_assets_empty_registry() {
+    let e = Env::default();
+    let admin = Address::generate(&e);
+    let client = create_contract(&e);
+    init_admin(&client, &admin);
+
+    let assets = client.assets();
+    assert_eq!(assets.len(), 0);
+}
+
+#[test]
+fn test_sep40_lastprice_empty_registry() {
+    let e = Env::default();
+    let admin = Address::generate(&e);
+    let client = create_contract(&e);
+    init_admin(&client, &admin);
+
+    let asset = Address::generate(&e);
+    let result = client.lastprice(&Asset::Stellar(asset));
+    assert!(result.is_none());
+}
+
+// ---- Task 3: i128 Boundary Value Tests ----
+
+#[test]
+fn test_i128_max_single_source() {
+    let e = Env::default();
+    ledger_default(&e, 100, 1000);
+
+    let admin = Address::generate(&e);
+    let client = create_contract(&e);
+    init_admin(&client, &admin);
+
+    let source = Address::generate(&e);
+    client.add_source(&source, &String::from_str(&e, "S"));
+    client.set_min_sources_required(&1u32);
+
+    let asset = Address::generate(&e);
+    client.register_asset(&asset);
+
+    client.submit_price(&source, &asset, &i128::MAX, &1000);
+    let price = client.get_price(&asset);
+    assert_eq!(price.price, i128::MAX);
+}
+
+#[test]
+fn test_i128_max_even_sources_no_overflow() {
+    // median of (MAX-1, MAX) = (MAX-1) + (MAX - (MAX-1)) / 2 = MAX-1 + 1/2 = MAX-1
+    // overflow-safe: a + (b-a)/2  where a=MAX-1, b=MAX  => MAX-1 + 1/2 = MAX-1
+    let e = Env::default();
+    ledger_default(&e, 100, 1000);
+
+    let admin = Address::generate(&e);
+    let client = create_contract(&e);
+    init_admin(&client, &admin);
+
+    let source1 = Address::generate(&e);
+    let source2 = Address::generate(&e);
+    client.add_source(&source1, &String::from_str(&e, "A"));
+    client.add_source(&source2, &String::from_str(&e, "B"));
+    client.set_min_sources_required(&2u32);
+
+    let asset = Address::generate(&e);
+    client.register_asset(&asset);
+
+    client.submit_price(&source1, &asset, &(i128::MAX - 1), &1000);
+    client.submit_price(&source2, &asset, &i128::MAX, &1000);
+
+    let price = client.get_price(&asset);
+    // overflow-safe: (MAX-1) + (MAX - (MAX-1)) / 2 = MAX-1 + 0 = MAX-1
+    assert_eq!(price.price, i128::MAX - 1);
+}
+
+#[test]
+fn test_i128_large_values_median_odd() {
+    let e = Env::default();
+    ledger_default(&e, 100, 1000);
+
+    let admin = Address::generate(&e);
+    let client = create_contract(&e);
+    init_admin(&client, &admin);
+
+    let source1 = Address::generate(&e);
+    let source2 = Address::generate(&e);
+    let source3 = Address::generate(&e);
+    client.add_source(&source1, &String::from_str(&e, "A"));
+    client.add_source(&source2, &String::from_str(&e, "B"));
+    client.add_source(&source3, &String::from_str(&e, "C"));
+    client.set_min_sources_required(&3u32);
+
+    let asset = Address::generate(&e);
+    client.register_asset(&asset);
+
+    let large = i128::MAX / 2;
+    client.submit_price(&source1, &asset, &1i128, &1000);
+    client.submit_price(&source2, &asset, &large, &1000);
+    client.submit_price(&source3, &asset, &i128::MAX, &1000);
+
+    let price = client.get_price(&asset);
+    assert_eq!(price.price, large);
+}
+
+#[test]
+fn test_i128_mixed_extreme_and_normal_even() {
+    // median of (1, 1000, MAX/2, MAX) — even count
+    // sorted: [1, 1000, MAX/2, MAX]
+    // median = overflow_safe_mid(1000, MAX/2)
+    let e = Env::default();
+    ledger_default(&e, 100, 1000);
+
+    let admin = Address::generate(&e);
+    let client = create_contract(&e);
+    init_admin(&client, &admin);
+
+    let source1 = Address::generate(&e);
+    let source2 = Address::generate(&e);
+    let source3 = Address::generate(&e);
+    let source4 = Address::generate(&e);
+    client.add_source(&source1, &String::from_str(&e, "A"));
+    client.add_source(&source2, &String::from_str(&e, "B"));
+    client.add_source(&source3, &String::from_str(&e, "C"));
+    client.add_source(&source4, &String::from_str(&e, "D"));
+    client.set_min_sources_required(&4u32);
+
+    let asset = Address::generate(&e);
+    client.register_asset(&asset);
+
+    let half_max = i128::MAX / 2;
+    client.submit_price(&source1, &asset, &1i128, &1000);
+    client.submit_price(&source2, &asset, &1000i128, &1000);
+    client.submit_price(&source3, &asset, &half_max, &1000);
+    client.submit_price(&source4, &asset, &i128::MAX, &1000);
+
+    let price = client.get_price(&asset);
+    // median of [1, 1000, half_max, MAX]: overflow-safe mid(1000, half_max)
+    let expected = 1000i128 + (half_max - 1000i128) / 2;
+    assert_eq!(price.price, expected);
+}
+
+#[test]
+fn test_i128_boundary_single_value_one() {
+    let e = Env::default();
+    ledger_default(&e, 100, 1000);
+
+    let admin = Address::generate(&e);
+    let client = create_contract(&e);
+    init_admin(&client, &admin);
+
+    let source = Address::generate(&e);
+    client.add_source(&source, &String::from_str(&e, "S"));
+    client.set_min_sources_required(&1u32);
+
+    let asset = Address::generate(&e);
+    client.register_asset(&asset);
+
+    client.submit_price(&source, &asset, &1i128, &1000);
+    let price = client.get_price(&asset);
+    assert_eq!(price.price, 1i128);
+}
+
+// ---- Task 4: Upgrade State Preservation Test ----
+
+#[test]
+fn test_upgrade_preserves_state() {
+    let e = Env::default();
+    ledger_default(&e, 100, 1234567890);
+
+    let admin = Address::generate(&e);
+    let client = create_contract(&e);
+    client.initialize(
+        &admin,
+        &2u32,
+        &50u32,
+        &8u32,
+        &String::from_str(&e, "Oracle"),
+    );
+
+    let source1 = Address::generate(&e);
+    let source2 = Address::generate(&e);
+    client.add_source(&source1, &String::from_str(&e, "Chainlink"));
+    client.add_source(&source2, &String::from_str(&e, "Band"));
+
+    let asset = Address::generate(&e);
+    client.register_asset(&asset);
+
+    client.submit_price(&source1, &asset, &100i128, &1234567890);
+    client.submit_price(&source2, &asset, &200i128, &1234567890);
+
+    // Perform upgrade
+    let wasm = include_bytes!("../../../target/wasm32v1-none/release/price_oracle.wasm");
+    let new_wasm_hash = e
+        .deployer()
+        .upload_contract_wasm(soroban_sdk::Bytes::from_slice(&e, wasm));
+    client.upgrade(&new_wasm_hash);
+
+    // Verify admin preserved
+    assert_eq!(client.get_admin_address(), admin);
+
+    // Verify sources preserved
+    assert!(client.is_source(&source1));
+    assert!(client.is_source(&source2));
+    let sources = client.get_oracle_sources();
+    assert_eq!(sources.sources.len(), 2);
+
+    // Verify asset preserved
+    assert!(client.is_asset_registered(&asset));
+
+    // Verify config preserved
+    assert_eq!(client.get_min_sources_required(), 2u32);
+    assert_eq!(client.get_max_history_length(), 50u32);
+    assert_eq!(client.get_decimals(), 8u32);
+    assert_eq!(client.get_description(), String::from_str(&e, "Oracle"));
+
+    // Verify price history preserved
+    let price = client.get_price(&asset);
+    assert_eq!(price.price, 150i128);
+    assert_eq!(price.num_sources, 2u32);
+
+    assert!(client.has_historical_price(&asset, &100u32));
+    let history = client.get_historical_price(&asset, &100u32);
+    assert_eq!(history.price, 150i128);
+}
