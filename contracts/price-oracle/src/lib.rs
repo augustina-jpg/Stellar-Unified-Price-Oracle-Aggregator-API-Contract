@@ -200,4 +200,9 @@ impl PriceOracleContract {
     }
 }
 
+#[cfg(test)]
+mod debug;
+#[cfg(test)]
+mod test_helpers;
+
 mod test;

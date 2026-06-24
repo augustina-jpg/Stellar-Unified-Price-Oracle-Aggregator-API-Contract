@@ -102,7 +102,7 @@ A **decentralized price oracle aggregator** built on Soroban (Stellar smart cont
 
 ### Prerequisites
 
-- Rust (stable toolchain)
+- Rust (stable toolchain, see `rust-toolchain.toml`)
 - Soroban CLI (optional, for deployment)
 
 ### Build
