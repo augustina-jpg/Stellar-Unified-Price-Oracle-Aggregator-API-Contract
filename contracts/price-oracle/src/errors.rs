@@ -12,4 +12,5 @@ pub enum ErrorCode {
     InsufficientSources = 6,
     InvalidPrice = 7,
     NoData = 8,
+    InvalidTimestamp = 9,
 }

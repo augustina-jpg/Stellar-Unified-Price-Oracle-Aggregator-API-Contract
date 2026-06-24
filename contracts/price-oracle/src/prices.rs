@@ -1,7 +1,7 @@
 use soroban_sdk::{panic_with_error, Address, Env, Vec};
 
-use crate::admin::{get_decimals, get_min_sources_required, get_resolution};
-use crate::events::{PriceAggregatedEvent, PriceSubmittedEvent};
+use crate::admin::{get_decimals, get_min_sources_required, get_resolution, get_timestamp_threshold};
+use crate::events::{PriceAggregatedEvent, PriceSubmittedEvent, SourcesInsufficientEvent};
 use crate::storage::{
     check_registered_asset, check_source, compute_median, read_oracle_sources, LEDGER_BUMP,
     LEDGER_THRESHOLD,
@@ -18,6 +18,12 @@ pub fn submit_price(env: &Env, source: Address, asset: Address, price: i128, tim
 
     if price <= 0 {
         panic_with_error!(env, ErrorCode::InvalidPrice);
+    }
+
+    let ledger_time = env.ledger().timestamp();
+    let threshold = get_timestamp_threshold(env);
+    if timestamp > ledger_time + threshold {
+        panic_with_error!(env, ErrorCode::InvalidTimestamp);
     }
 
     let decimals = get_decimals(env);
@@ -105,24 +111,37 @@ pub fn submit_price(env: &Env, source: Address, asset: Address, price: i128, tim
             timestamp: latest_timestamp,
         }
         .publish(env);
+    } else {
+        SourcesInsufficientEvent {
+            asset: asset.clone(),
+            current_source_count: contributing_sources,
+            min_sources_required: min_required,
+        }
+        .publish(env);
     }
 }
 
-pub fn get_price(env: &Env, asset: Address) -> AggregatePrice {
+pub fn get_price(env: &Env, asset: Address, max_age: u64) -> Option<AggregatePrice> {
     check_registered_asset(env, &asset);
-    let key = DataKey::Aggregate(asset);
-    env.storage()
-        .persistent()
-        .extend_ttl(&key, LEDGER_THRESHOLD, LEDGER_BUMP);
-    let result: AggregatePrice = env.storage().persistent().get(&key).unwrap();
+    let key = DataKey::Aggregate(asset.clone());
+    let result: AggregatePrice = env.storage().persistent().get(&key)?;
+    if max_age > 0 {
+        let ledger_time = env.ledger().timestamp();
+        if result.timestamp + max_age < ledger_time {
+            return None;
+        }
+    }
     let resolution = get_resolution(env);
     if resolution > 0 {
         let ledger_time = env.ledger().timestamp();
         if result.timestamp + (resolution as u64) < ledger_time {
-            panic_with_error!(env, ErrorCode::NoData);
+            return None;
         }
     }
-    result
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD, LEDGER_BUMP);
+    Some(result)
 }
 
 pub fn get_source_price(env: &Env, asset: Address, source: Address) -> PriceEntry {
