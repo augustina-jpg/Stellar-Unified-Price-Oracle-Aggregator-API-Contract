@@ -75,7 +75,7 @@ A **decentralized price oracle aggregator** built on Soroban (Stellar smart cont
 
 ### Prerequisites
 
-- Rust (stable toolchain)
+- Rust (stable toolchain, see `rust-toolchain.toml`)
 - Soroban CLI (optional, for deployment)
 
 ### Build
@@ -88,6 +88,27 @@ cargo build -p price-oracle --target wasm32v1-none --release
 
 ```bash
 cargo test -p price-oracle --lib
+```
+
+### Docker
+
+Build the WASM artifact in a fully reproducible environment:
+
+```bash
+docker build --target builder -t price-oracle-builder .
+```
+
+Extract the compiled WASM:
+
+```bash
+docker build --output type=local,dest=./out .
+# artifact will be at ./out/price_oracle.wasm
+```
+
+Run tests inside Docker:
+
+```bash
+docker run --rm price-oracle-builder cargo test -p price-oracle --lib
 ```
 
 All **56 tests pass** with zero warnings.
