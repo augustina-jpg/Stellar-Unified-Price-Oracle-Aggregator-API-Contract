@@ -17,8 +17,11 @@ pub struct PriceAggregatedEvent {
     #[topic]
     pub asset: Address,
     pub price: i128,
+    pub prev_price: i128,
     pub num_sources: u32,
     pub timestamp: u64,
+    pub prev_timestamp: u64,
+    pub decimals: u32,
 }
 
 #[contractevent]
@@ -91,4 +94,16 @@ pub struct DescriptionChangedEvent {
 #[derive(Clone)]
 pub struct ContractUpgradedEvent {
     pub new_wasm_hash: soroban_sdk::BytesN<32>,
+}
+
+#[contractevent]
+#[derive(Clone)]
+pub struct DuplicateSubmissionEvent {
+    #[topic]
+    pub asset: Address,
+    #[topic]
+    pub source: Address,
+    pub old_price: i128,
+    pub new_price: i128,
+    pub ledger: u32,
 }

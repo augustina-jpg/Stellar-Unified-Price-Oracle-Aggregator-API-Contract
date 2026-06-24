@@ -378,6 +378,32 @@ impl PriceOracleContract {
         }
 
         let decimals = Self::get_decimals(env.clone());
+        let current_ledger = env.ledger().sequence();
+
+        // Detect duplicate: same source+asset already submitted in this ledger
+        let ledger_key = DataKey::SubmissionLedger(asset.clone(), source.clone());
+        let prev_ledger: Option<u32> = env.storage().temporary().get(&ledger_key);
+        if let Some(submitted_ledger) = prev_ledger {
+            if submitted_ledger == current_ledger {
+                // Duplicate submission — update price and emit dedup event
+                let old_entry: PriceEntry = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::Submission(asset.clone(), source.clone()))
+                    .unwrap();
+                DuplicateSubmissionEvent {
+                    asset: asset.clone(),
+                    source: source.clone(),
+                    old_price: old_entry.price,
+                    new_price: price,
+                    ledger: current_ledger,
+                }
+                .publish(&env);
+            }
+        }
+
+        // Record which ledger this source last submitted for this asset
+        env.storage().temporary().set(&ledger_key, &current_ledger);
 
         let entry = PriceEntry {
             price,
@@ -459,8 +485,11 @@ impl PriceOracleContract {
             PriceAggregatedEvent {
                 asset: asset.clone(),
                 price: median_price,
+                prev_price: prev_aggregate.price,
                 num_sources: contributing_sources,
                 timestamp: latest_timestamp,
+                prev_timestamp: prev_aggregate.timestamp,
+                decimals,
             }
             .publish(&env);
         }
